@@ -1,0 +1,52 @@
+# Source files
+src/
+examples/
+tests/
+
+# TypeScript files (except declarations)
+*.ts
+!*.d.ts
+
+# Configuration files
+tsconfig.json
+jest.config.js
+.eslintrc.js
+.prettierrc
+
+# Git files
+.gitignore
+.git
+.github/
+
+# IDE files
+.idea
+.vscode
+*.swp
+*.swo
+
+# Dependencies
+node_modules/
+
+# Test files
+coverage/
+*.spec.ts
+*.test.ts
+__tests__/
+test/
+
+# Documentation (keep README and LICENSE)
+CONTRIBUTING.md
+TESTING_FINAL_REPORT.md
+TEST_PLAN.md
+TESTING_STATUS.md
+CLAUDE.md
+
+# CI/CD
+.travis.yml
+.circleci/
+.github/workflows/
+
+# Other
+*.log
+.DS_Store
+*.tgz
