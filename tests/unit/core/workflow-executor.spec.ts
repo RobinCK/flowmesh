@@ -959,4 +959,86 @@ describe('WorkflowExecutor - Uncovered Branches', () => {
       });
     });
   });
+
+  describe('Custom executionId', () => {
+    it('should use custom executionId when provided', async () => {
+      @State(TestState.INITIAL)
+      class InitialState implements IState<TestData, TestOutputs, 'INITIAL'> {
+        execute(ctx: WorkflowContext<TestData, TestOutputs>, actions: StateActions<TestData, TestOutputs, 'INITIAL'>) {
+          actions.complete({ output: { initialized: true } });
+        }
+      }
+
+      @Workflow({
+        name: 'CustomIdWorkflow',
+        states: TestState,
+        initialState: TestState.INITIAL,
+      })
+      class CustomIdWorkflow extends ExecutableWorkflow<TestData> {}
+
+      StateRegistry.autoRegister([new InitialState()]);
+      engine.registerWorkflow(CustomIdWorkflow);
+
+      const customId = 'custom_execution_id_123';
+      const result = await engine.execute(CustomIdWorkflow, {
+        data: { value: 1 },
+        executionId: customId,
+      });
+
+      expect(result.id).toBe(customId);
+      expect(result.status).toBe(WorkflowStatus.COMPLETED);
+    });
+
+    it('should auto-generate executionId when not provided', async () => {
+      @State(TestState.INITIAL)
+      class InitialState implements IState<TestData, TestOutputs, 'INITIAL'> {
+        execute(ctx: WorkflowContext<TestData, TestOutputs>, actions: StateActions<TestData, TestOutputs, 'INITIAL'>) {
+          actions.complete({ output: { initialized: true } });
+        }
+      }
+
+      @Workflow({
+        name: 'AutoIdWorkflow',
+        states: TestState,
+        initialState: TestState.INITIAL,
+      })
+      class AutoIdWorkflow extends ExecutableWorkflow<TestData> {}
+
+      StateRegistry.autoRegister([new InitialState()]);
+      engine.registerWorkflow(AutoIdWorkflow);
+
+      const result = await engine.execute(AutoIdWorkflow, {
+        data: { value: 1 },
+      });
+
+      expect(result.id).toBeDefined();
+      expect(result.id).toMatch(/^exec_\d+_[a-z0-9]+$/);
+      expect(result.status).toBe(WorkflowStatus.COMPLETED);
+    });
+
+    it('should use custom executionId via ExecutableWorkflow.execute()', async () => {
+      @State(TestState.INITIAL)
+      class InitialState implements IState<TestData, TestOutputs, 'INITIAL'> {
+        execute(ctx: WorkflowContext<TestData, TestOutputs>, actions: StateActions<TestData, TestOutputs, 'INITIAL'>) {
+          actions.complete({ output: { initialized: true } });
+        }
+      }
+
+      @Workflow({
+        name: 'ExecutableIdWorkflow',
+        states: TestState,
+        initialState: TestState.INITIAL,
+      })
+      class ExecutableIdWorkflow extends ExecutableWorkflow<TestData> {}
+
+      StateRegistry.autoRegister([new InitialState()]);
+
+      const workflow = new ExecutableIdWorkflow();
+      const customId = 'workflow_tx_456';
+      const result = await workflow.execute({ value: 1 }, customId);
+
+      expect(result.id).toBe(customId);
+      expect(result.status).toBe(WorkflowStatus.COMPLETED);
+    });
+  });
 });

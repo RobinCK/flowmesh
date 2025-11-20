@@ -67,9 +67,9 @@ export abstract class ExecutableWorkflow<TData extends Record<string, unknown> =
   /**
    * Execute the workflow with the given data.
    */
-  async execute(data: TData): Promise<WorkflowExecution<TData>> {
+  async execute(data: TData, executionId?: string): Promise<WorkflowExecution<TData>> {
     const engine = this.getEngine();
-    return engine.execute(this.constructor as any, { data });
+    return engine.execute(this.constructor as any, { data, executionId });
   }
 
   /**

@@ -2511,10 +2511,17 @@ execute<TWorkflow, TData, TOutputs>(
   options: {
     data: TData;
     groupId?: string;
+    executionId?: string;
     metadata?: Record<string, any>;
   }
 ): Promise<WorkflowExecution<TData, TOutputs>>
 ```
+
+**Parameters:**
+- `data`: Initial workflow data
+- `groupId` (optional): Group identifier for concurrency control
+- `executionId` (optional): Custom execution ID. If not provided, auto-generated as `exec_{timestamp}_{random}`
+- `metadata` (optional): Additional metadata
 
 **resume**
 
@@ -2564,6 +2571,49 @@ const execution = await engine.resume(OrderWorkflow, executionId, {
   targetState: 'SHIPPING',
   data: { fastTrack: true }
 });
+```
+
+**Custom Execution ID**
+
+You can provide a custom `executionId` for idempotency or integration with external systems:
+
+```typescript
+// Using custom executionId for idempotency
+const transactionId = 'tx_12345';
+const result = await engine.execute(WithdrawalWorkflow, {
+  data: {
+    transactionId,
+    amount: 100,
+    userId: 'user_123'
+  },
+  executionId: `withdrawal_${transactionId}` // Custom ID based on transaction
+});
+
+// Later, you can retrieve the execution by the same ID
+const execution = await engine.getExecution(`withdrawal_${transactionId}`);
+```
+
+**Use cases for custom executionId:**
+- **Idempotency**: Use external transaction/request IDs to prevent duplicate workflow executions
+- **Integration**: Match workflow executions with external system identifiers
+- **Tracking**: Use meaningful IDs for easier monitoring and debugging
+
+**With ExecutableWorkflow:**
+
+```typescript
+@Workflow({
+  name: 'OrderProcessing',
+  states: OrderState,
+  initialState: OrderState.CREATED
+})
+class OrderWorkflow extends ExecutableWorkflow<OrderData> {}
+
+// Provide custom executionId as second parameter
+const workflow = new OrderWorkflow();
+const result = await workflow.execute(
+  { orderId: 'ORD-123', items: ['item1'] },
+  'order_ORD-123' // Custom executionId
+);
 ```
 
 **getExecution**

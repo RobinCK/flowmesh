@@ -27,6 +27,7 @@ import {
 export interface ExecutionOptions<TData extends Record<string, unknown> = Record<string, unknown>> {
   data: TData;
   groupId?: string;
+  executionId?: string;
 }
 
 export enum ResumeStrategy {
@@ -97,7 +98,7 @@ export class WorkflowExecutor<
   async execute(options: ExecutionOptions<TData>): Promise<WorkflowExecution<TData>> {
     await this.initializePlugins();
 
-    const executionId = this.generateExecutionId();
+    const executionId = options.executionId || this.generateExecutionId();
     const groupId = options.groupId || this.getGroupId(options.data);
 
     const context: WorkflowContext<TData, TOutputs> = {
