@@ -5,3 +5,5 @@ export * from './state-registry';
 export * from './concurrency-manager';
 export * from './outputs-accessor';
 export * from './executable-workflow';
+export * from './workflow-graph-builder';
+export * from './execution-graph-builder';

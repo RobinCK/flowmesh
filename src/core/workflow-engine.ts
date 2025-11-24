@@ -3,6 +3,9 @@ import { WorkflowExecutor, ExecutionOptions, ResumeOptions } from './workflow-ex
 import { ConcurrencyManager } from './concurrency-manager';
 import { StateRegistry } from './state-registry';
 import { getWorkflowMetadata } from '../decorators';
+import { WorkflowGraph, ExecutionGraph } from '../types/graph.types';
+import { WorkflowGraphBuilder } from './workflow-graph-builder';
+import { ExecutionGraphBuilder } from './execution-graph-builder';
 
 export interface WorkflowEngineConfig {
   persistence?: PersistenceAdapter;
@@ -110,5 +113,39 @@ export class WorkflowEngine {
   clearRegistry(): void {
     this.executors.clear();
     StateRegistry.clear();
+  }
+
+  /**
+   * Get a static graph showing all possible states and transitions for a workflow
+   * @param workflowClass - The workflow class decorated with @Workflow
+   * @returns WorkflowGraph with nodes (states) and edges (transitions)
+   */
+  getWorkflowGraph(workflowClass: new (...args: any[]) => any): WorkflowGraph {
+    const metadata = getWorkflowMetadata(workflowClass);
+
+    if (!metadata) {
+      throw new Error(`Class ${workflowClass.name} is not decorated with @Workflow`);
+    }
+
+    return WorkflowGraphBuilder.buildGraph(metadata);
+  }
+
+  /**
+   * Get an execution graph showing the actual execution path with statuses
+   * @param executionId - The ID of the workflow execution
+   * @returns ExecutionGraph with nodes (states with statuses) and edges (actual transitions)
+   */
+  async getExecutionGraph(executionId: string): Promise<ExecutionGraph> {
+    if (!this.config.persistence) {
+      throw new Error('Persistence adapter is required to get execution graph');
+    }
+
+    const execution = await this.config.persistence.load(executionId);
+
+    if (!execution) {
+      throw new Error(`Execution with id ${executionId} not found`);
+    }
+
+    return ExecutionGraphBuilder.buildGraph(execution);
   }
 }
