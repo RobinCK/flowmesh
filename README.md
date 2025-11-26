@@ -19,6 +19,7 @@ A type-safe workflow engine for TypeScript with declarative approach and NestJS 
 - NestJS integration with dependency injection
 - Plugin system for extensibility
 - Flexible error handling with custom error handlers
+- Workflow graph generation for visualization and analysis
 
 ## Installation
 
@@ -119,6 +120,7 @@ console.log(result.outputs[OrderState.CREATED]?.orderId); // 'ORD-001'
 - [Suspend and Resume](#suspend-and-resume)
 - [Adapters](#adapters)
 - [NestJS Integration](#nestjs-integration)
+- [Workflow Graphs](#workflow-graphs)
 - [API Reference](#api-reference)
 - [Examples](#examples)
 - [Testing](#testing)
@@ -2482,6 +2484,293 @@ export class OrderWorkflow extends ExecutableWorkflow {}
 @WorkflowConfig({})
 @Injectable()
 export class NotificationWorkflow extends ExecutableWorkflow {}
+```
+
+## Workflow Graphs
+
+FlowMesh provides powerful graph generation capabilities for visualizing and analyzing workflows. There are two types of graphs:
+
+### Static Workflow Graph
+
+Generate a complete graph showing all possible states and transitions from workflow metadata:
+
+```typescript
+// Get static graph with all possible paths
+const graph = engine.getWorkflowGraph(WithdrawalWorkflow);
+
+console.log(graph.workflowName);  // 'cryptocurrency-withdrawal'
+console.log(graph.nodes.length);   // All states from enum
+console.log(graph.edges.length);   // All possible transitions
+```
+
+**Graph Structure:**
+
+```typescript
+interface WorkflowGraph {
+  workflowName: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+interface GraphNode {
+  id: string;              // State name
+  label: string;           // Display label
+  isInitial: boolean;      // Is this the initial state?
+  isVirtual?: boolean;     // Can be skipped via conditional transition?
+  metadata?: {             // State decorators
+    timeout?: number;
+    retry?: RetryConfig;
+    unlockAfter?: boolean;
+  };
+}
+
+interface GraphEdge {
+  from: string;                // Source state
+  to: string;                  // Target state
+  type: 'explicit' | 'conditional' | 'automatic';
+  condition?: string;          // Function string for conditionals
+  label?: string;              // 'condition 1', 'default', 'next'
+  virtualStates?: string[];    // States skipped on this transition
+}
+```
+
+**Example - Iterating Through Graph:**
+
+```typescript
+const graph = engine.getWorkflowGraph(WithdrawalWorkflow);
+
+// Show all states (including rollback states)
+graph.nodes.forEach(node => {
+  const markers = [
+    node.isInitial ? '[INITIAL]' : '',
+    node.isVirtual ? '(can be skipped)' : '',
+  ].filter(Boolean).join(' ');
+
+  console.log(`${node.id} ${markers}`);
+
+  // Show state metadata
+  if (node.metadata) {
+    if (node.metadata.timeout) {
+      console.log(`  Timeout: ${node.metadata.timeout}ms`);
+    }
+    if (node.metadata.retry) {
+      console.log(`  Retry: ${node.metadata.retry.maxAttempts} attempts`);
+    }
+  }
+});
+
+// Show all transitions
+graph.edges.forEach(edge => {
+  const skipInfo = edge.virtualStates
+    ? ` [skips: ${edge.virtualStates.join(', ')}]`
+    : '';
+  console.log(`${edge.from} → ${edge.to} [${edge.type}]${skipInfo}`);
+});
+```
+
+**Virtual States:**
+
+States marked as `isVirtual: true` can be skipped via conditional transitions with `virtualOutputs`:
+
+```typescript
+@Workflow({
+  conditionalTransitions: [
+    {
+      from: OrderState.START,
+      conditions: [
+        {
+          condition: ctx => ctx.data.isPremium,
+          to: OrderState.COMPLETED,
+          virtualOutputs: {
+            // These states will be skipped but get virtual outputs
+            [OrderState.VALIDATION]: { validated: true, skipped: true },
+            [OrderState.PAYMENT]: { paid: true, skipped: true },
+          },
+        },
+      ],
+      default: OrderState.VALIDATION,
+    },
+  ],
+})
+export class OrderWorkflow {}
+
+// In the graph:
+const validationNode = graph.nodes.find(n => n.id === 'VALIDATION');
+console.log(validationNode.isVirtual);  // true
+
+const premiumEdge = graph.edges.find(e => e.from === 'START' && e.to === 'COMPLETED');
+console.log(premiumEdge.virtualStates);  // ['VALIDATION', 'PAYMENT']
+```
+
+### Dynamic Execution Graph
+
+Generate a graph showing the actual execution path with statuses and timing:
+
+```typescript
+// Execute workflow
+const execution = await engine.execute(WithdrawalWorkflow, { data });
+
+// Get execution graph
+const execGraph = await engine.getExecutionGraph(execution.id);
+
+console.log(execGraph.status);        // 'completed'
+console.log(execGraph.currentState);  // 'COMPLETED'
+```
+
+**Graph Structure:**
+
+```typescript
+interface ExecutionGraph {
+  executionId: string;
+  workflowName: string;
+  status: WorkflowStatus;   // 'running' | 'suspended' | 'completed' | 'failed'
+  currentState: string;
+  nodes: ExecutionNode[];
+  edges: ExecutionEdge[];
+}
+
+interface ExecutionNode {
+  id: string;                // State name
+  label: string;
+  status: ExecutionNodeStatus;  // 'executed' | 'current' | 'failed' | 'suspended' | 'skipped'
+  attempts: number;          // Number of retry attempts
+  totalDuration?: number;    // Total execution time in ms
+  output?: unknown;          // State output data
+  error?: string;            // Error message if failed
+}
+
+interface ExecutionEdge {
+  from: string;
+  to: string;
+  status: 'success' | 'failure' | 'suspended' | 'error_recovery';
+  transitionType?: 'explicit' | 'conditional' | 'automatic';
+  startedAt: Date;
+  completedAt?: Date;
+  duration?: number;         // Transition duration in ms
+  error?: string;
+  attempt?: number;          // Retry attempt number
+}
+```
+
+**Example - Analyzing Execution:**
+
+```typescript
+const execGraph = await engine.getExecutionGraph(executionId);
+
+// Show executed states with timing
+execGraph.nodes.forEach(node => {
+  const timing = node.totalDuration ? `(${node.totalDuration}ms)` : '';
+  const retries = node.attempts > 1 ? `[${node.attempts} attempts]` : '';
+  console.log(`${node.id}: ${node.status} ${timing} ${retries}`);
+
+  if (node.error) {
+    console.log(`  Error: ${node.error}`);
+  }
+});
+
+// Show transitions with status
+execGraph.edges.forEach(edge => {
+  const duration = edge.duration ? `${edge.duration}ms` : '';
+  console.log(`${edge.from} → ${edge.to} [${edge.status}] ${duration}`);
+});
+```
+
+**Comparing Static vs Execution Graphs:**
+
+```typescript
+// Get both graphs
+const staticGraph = engine.getWorkflowGraph(WithdrawalWorkflow);
+const execGraph = await engine.getExecutionGraph(executionId);
+
+// Static graph shows ALL possible states (including rollback)
+console.log('All possible states:', staticGraph.nodes.length);
+
+// Execution graph shows only states that were actually executed
+console.log('Executed states:', execGraph.nodes.length);
+
+// Find which states weren't executed
+const executedStateIds = new Set(execGraph.nodes.map(n => n.id));
+const notExecuted = staticGraph.nodes.filter(n => !executedStateIds.has(n.id));
+
+console.log('States not executed:', notExecuted.map(n => n.id));
+// Example output: ['SIMPLE_ROLLBACK', 'CONVERSION_ROLLBACK']
+```
+
+### Use Cases
+
+**1. Visualization** - Generate diagrams for documentation:
+```typescript
+const graph = engine.getWorkflowGraph(Workflow);
+
+// Generate Mermaid diagram
+function toMermaid(graph: WorkflowGraph): string {
+  let diagram = 'graph TD\n';
+
+  graph.edges.forEach(edge => {
+    const label = edge.virtualStates
+      ? `skips: ${edge.virtualStates.join(', ')}`
+      : edge.label || '';
+    diagram += `  ${edge.from}-->${label}-->${edge.to}\n`;
+  });
+
+  return diagram;
+}
+```
+
+**2. Debugging** - Understand execution vs expected flow:
+```typescript
+const staticGraph = engine.getWorkflowGraph(Workflow);
+const execGraph = await engine.getExecutionGraph(executionId);
+
+// Check if execution followed expected path
+const expectedPath = ['START', 'VALIDATION', 'PROCESSING', 'END'];
+const actualPath = execGraph.nodes.map(n => n.id);
+
+console.log('Expected:', expectedPath);
+console.log('Actual:', actualPath);
+```
+
+**3. Validation** - Verify workflow configuration:
+```typescript
+const graph = engine.getWorkflowGraph(Workflow);
+
+// Find unreachable states
+const reachableStates = new Set(graph.edges.map(e => e.to));
+reachableStates.add(graph.nodes.find(n => n.isInitial)?.id);
+
+const unreachable = graph.nodes.filter(n => !reachableStates.has(n.id));
+console.log('Unreachable states:', unreachable.map(n => n.id));
+```
+
+**4. Monitoring** - Track workflow performance:
+```typescript
+const execGraph = await engine.getExecutionGraph(executionId);
+
+// Find slowest states
+const slowStates = execGraph.nodes
+  .filter(n => n.totalDuration)
+  .sort((a, b) => (b.totalDuration || 0) - (a.totalDuration || 0))
+  .slice(0, 5);
+
+console.log('Slowest states:', slowStates);
+```
+
+**5. Runtime Analysis** - Compare actual vs possible paths:
+```typescript
+const staticGraph = engine.getWorkflowGraph(Workflow);
+const execGraph = await engine.getExecutionGraph(executionId);
+
+// Show which conditional branch was taken
+const conditionalEdges = staticGraph.edges.filter(e => e.type === 'conditional');
+const takenTransitions = new Set(
+  execGraph.edges.map(e => `${e.from}->${e.to}`)
+);
+
+conditionalEdges.forEach(edge => {
+  const key = `${edge.from}->${edge.to}`;
+  const taken = takenTransitions.has(key) ? '✓' : '✗';
+  console.log(`${taken} ${edge.from} → ${edge.to} [${edge.label}]`);
+});
 ```
 
 ## API Reference
