@@ -357,6 +357,7 @@ export class WorkflowExecutor<
           decision: ErrorHandlingDecision;
           targetState?: keyof TOutputs;
           output?: any;
+          onContextTransform?: (context: WorkflowContext<TData, TOutputs>) => void;
         };
 
         if (attachedResult) {
@@ -402,6 +403,11 @@ export class WorkflowExecutor<
 
           if (handlerResult.output !== undefined) {
             (context.outputs as any)[context.currentState] = handlerResult.output;
+          }
+
+          // Execute context transform callback if provided
+          if (handlerResult.onContextTransform) {
+            handlerResult.onContextTransform(context);
           }
 
           context.currentState = targetState;
@@ -726,7 +732,12 @@ export class WorkflowExecutor<
     execution: WorkflowExecution,
     attempt?: number,
     maxAttempts?: number
-  ): Promise<{ decision: ErrorHandlingDecision; targetState?: keyof TOutputs; output?: any }> {
+  ): Promise<{
+    decision: ErrorHandlingDecision;
+    targetState?: keyof TOutputs;
+    output?: any;
+    onContextTransform?: (context: WorkflowContext<TData, TOutputs>) => void;
+  }> {
     if (!this.metadata.errorHandler) {
       return { decision: ErrorHandlingDecision.FAIL };
     }
@@ -745,6 +756,7 @@ export class WorkflowExecutor<
           decision: result.decision,
           targetState: result.targetState as keyof TOutputs,
           output: result.output,
+          onContextTransform: result.onContextTransform as ((context: WorkflowContext<TData, TOutputs>) => void) | undefined,
         };
       }
 

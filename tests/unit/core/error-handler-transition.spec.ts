@@ -41,7 +41,7 @@ class TransitionError extends Error {
 }
 
 class TransitionToErrorHandler implements ErrorHandler<TestData, TestOutputs> {
-  handle(context: ErrorContext<TestData, TestOutputs>): TransitionToDecision | ErrorHandlingDecision {
+  handle(context: ErrorContext<TestData, TestOutputs>): TransitionToDecision<TestData, TestOutputs> | ErrorHandlingDecision {
     const { error, phase, workflowContext } = context;
 
     if (error instanceof TransitionError && phase === 'state_execute') {
@@ -60,7 +60,7 @@ class TransitionToErrorHandler implements ErrorHandler<TestData, TestOutputs> {
 }
 
 class TransitionToWithOutputHandler implements ErrorHandler<TestData, TestOutputs> {
-  handle(context: ErrorContext<TestData, TestOutputs>): TransitionToDecision | ErrorHandlingDecision {
+  handle(context: ErrorContext<TestData, TestOutputs>): TransitionToDecision<TestData, TestOutputs> | ErrorHandlingDecision {
     const { error, phase } = context;
 
     if (error instanceof TransitionError && phase === 'state_execute') {

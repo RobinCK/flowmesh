@@ -1,6 +1,6 @@
 {
   "name": "flowmesh",
-  "version": "3.7.11",
+  "version": "3.9.4",
   "description": "Type-safe workflow engine for TypeScript with declarative approach and NestJS integration",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

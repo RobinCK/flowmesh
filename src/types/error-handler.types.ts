@@ -9,13 +9,20 @@ export enum ErrorHandlingDecision {
   STOP_RETRY = 'stop_retry',
 }
 
-export interface TransitionToDecision {
+export interface TransitionToDecision<
+  TData extends Record<string, unknown> = Record<string, unknown>,
+  TOutputs extends Record<string, unknown> = Record<string, unknown>,
+> {
   decision: ErrorHandlingDecision.TRANSITION_TO;
   targetState: string;
   output?: any;
+  onContextTransform?: (context: WorkflowContext<TData, TOutputs>) => void;
 }
 
-export type ErrorHandlingResult = ErrorHandlingDecision | TransitionToDecision;
+export type ErrorHandlingResult<
+  TData extends Record<string, unknown> = Record<string, unknown>,
+  TOutputs extends Record<string, unknown> = Record<string, unknown>,
+> = ErrorHandlingDecision | TransitionToDecision<TData, TOutputs>;
 
 export type ErrorPhase =
   | 'lock_acquisition'
@@ -40,5 +47,7 @@ export interface ErrorHandler<
   TData extends Record<string, unknown> = Record<string, unknown>,
   TOutputs extends Record<string, unknown> = Record<string, unknown>,
 > {
-  handle(context: ErrorContext<TData, TOutputs>): Promise<ErrorHandlingResult> | ErrorHandlingResult;
+  handle(
+    context: ErrorContext<TData, TOutputs>
+  ): Promise<ErrorHandlingResult<TData, TOutputs>> | ErrorHandlingResult<TData, TOutputs>;
 }

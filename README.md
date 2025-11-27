@@ -1462,6 +1462,66 @@ console.log(result.history);
 - Invalid transitions are treated as `EXIT` with a warning
 - Output is set on the **failed state**, not the target state
 
+**Context Transform Callback:**
+
+For advanced scenarios where you need to modify workflow context during error recovery, use `onContextTransform`:
+
+```typescript
+return {
+  decision: ErrorHandlingDecision.TRANSITION_TO,
+  targetState: 'ROLLBACK',
+  output: {
+    failureReason: error.message  // Set on failed state
+  },
+  onContextTransform: (ctx) => {
+    // Modify target state output
+    ctx.outputs['ROLLBACK'] = {
+      rollbackType: 'SIMPLE',
+      originalState: ctx.currentState
+    };
+
+    // Modify workflow data
+    ctx.data.rollbackInitiated = true;
+
+    // Set outputs for multiple states
+    ctx.outputs['SOME_OTHER_STATE'] = { ... };
+  }
+};
+```
+
+**Benefits:**
+- Set output directly on target state (not just failed state)
+- Modify workflow data during error recovery
+- Set outputs for multiple states in one go
+- Full type safety with `WorkflowContext<TData, TOutputs>`
+
+**Example: Rollback with Context Transform**
+
+```typescript
+class RollbackErrorHandler implements ErrorHandler<OrderData, OrderOutputs> {
+  handle(context: ErrorContext<OrderData, OrderOutputs>) {
+    if (context.error instanceof PaymentFailedError) {
+      return {
+        decision: ErrorHandlingDecision.TRANSITION_TO,
+        targetState: OrderState.ROLLBACK,
+        onContextTransform: (ctx) => {
+          // Prepare rollback data for target state
+          ctx.outputs[OrderState.ROLLBACK] = {
+            rollbackType: 'PAYMENT_FAILURE',
+            originalAmount: ctx.data.amount,
+            failedAt: new Date(),
+          };
+
+          // Mark in data for downstream states
+          ctx.data.rollbackReason = 'payment_failed';
+        }
+      };
+    }
+    return ErrorHandlingDecision.FAIL;
+  }
+}
+```
+
 #### STOP_RETRY
 
 Stop retry attempts immediately and proceed with the current error handling. Only applicable when used with `@Retry` decorator.
