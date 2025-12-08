@@ -2,10 +2,12 @@ export * from './types';
 export {
   State,
   Timeout,
+  Delay,
   Retry,
   UnlockAfter,
   getStateMetadata,
   getStateTimeout,
+  getStateDelay,
   getStateRetry,
   getStateConcurrency,
 } from './decorators/state.decorator';

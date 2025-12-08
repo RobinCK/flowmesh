@@ -3,6 +3,7 @@ import { StateMetadata, RetryConfig, StateConcurrencyConfig } from '../types';
 
 export const STATE_METADATA_KEY = Symbol.for('flowmesh:state');
 export const STATE_TIMEOUT_KEY = Symbol.for('flowmesh:state:timeout');
+export const STATE_DELAY_KEY = Symbol.for('flowmesh:state:delay');
 export const STATE_RETRY_KEY = Symbol.for('flowmesh:state:retry');
 export const STATE_CONCURRENCY_KEY = Symbol.for('flowmesh:state:concurrency');
 
@@ -27,6 +28,13 @@ export function Timeout(milliseconds: number): ClassDecorator {
   };
 }
 
+export function Delay(milliseconds: number): ClassDecorator {
+  return (target: any) => {
+    Reflect.defineMetadata(STATE_DELAY_KEY, milliseconds, target);
+    Reflect.defineMetadata(STATE_DELAY_KEY, milliseconds, target.prototype);
+  };
+}
+
 export function Retry(config: RetryConfig): ClassDecorator {
   return (target: any) => {
     Reflect.defineMetadata(STATE_RETRY_KEY, config, target);
@@ -48,6 +56,10 @@ export function getStateMetadata<TState = unknown>(target: any): StateMetadata<T
 
 export function getStateTimeout(target: any): number | undefined {
   return Reflect.getMetadata(STATE_TIMEOUT_KEY, target) || Reflect.getMetadata(STATE_TIMEOUT_KEY, target.prototype);
+}
+
+export function getStateDelay(target: any): number | undefined {
+  return Reflect.getMetadata(STATE_DELAY_KEY, target) || Reflect.getMetadata(STATE_DELAY_KEY, target.prototype);
 }
 
 export function getStateRetry(target: any): RetryConfig | undefined {

@@ -43,7 +43,7 @@ export interface WorkflowMetadataConfig<TState = unknown> {
   concurrency?: ConcurrencyConfig;
   transitions?: TransitionConfig<TState>[];
   conditionalTransitions?: ConditionalTransition<TState>[];
-  errorHandler?: ErrorHandler;
+  errorHandler?: ErrorHandler | (new (...args: any[]) => ErrorHandler);
 }
 
 export interface WorkflowLifecycleHooks<

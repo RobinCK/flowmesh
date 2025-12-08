@@ -743,7 +743,7 @@ export class WorkflowExecutor<
     }
 
     try {
-      const result = await this.metadata.errorHandler.handle({
+      const result = await (this.metadata.errorHandler as any).handle({
         error,
         phase,
         workflowContext: context as WorkflowContext<Record<string, unknown>, Record<string, unknown>>,

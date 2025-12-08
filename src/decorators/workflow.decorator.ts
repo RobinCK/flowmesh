@@ -10,7 +10,7 @@ export interface WorkflowDecoratorOptions<TState = unknown> {
   concurrency?: ConcurrencyConfig;
   transitions?: TransitionConfig<TState>[];
   conditionalTransitions?: ConditionalTransition<TState>[];
-  errorHandler?: ErrorHandler;
+  errorHandler?: ErrorHandler | (new (...args: any[]) => ErrorHandler);
 }
 
 export function Workflow<TState>(options: WorkflowDecoratorOptions<TState>): ClassDecorator {

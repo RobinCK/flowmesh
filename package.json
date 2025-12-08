@@ -1,6 +1,6 @@
 {
   "name": "flowmesh",
-  "version": "3.9.4",
+  "version": "3.9.13",
   "description": "Type-safe workflow engine for TypeScript with declarative approach and NestJS integration",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -46,8 +46,8 @@
   "homepage": "https://github.com/RobinCK/flowmesh#readme",
   "license": "MIT",
   "peerDependencies": {
-    "@nestjs/common": "^10.0.0",
-    "@nestjs/core": "^10.0.0",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
     "reflect-metadata": "^0.2.0"
   },
   "peerDependenciesMeta": {
@@ -59,9 +59,9 @@
     }
   },
   "devDependencies": {
-    "@nestjs/common": "^10.0.0",
-    "@nestjs/core": "^10.0.0",
-    "@nestjs/testing": "^10.4.20",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/testing": "^11.0.0",
     "@testcontainers/postgresql": "^11.8.0",
     "@types/ioredis": "^4.28.10",
     "@types/jest": "^30.0.0",

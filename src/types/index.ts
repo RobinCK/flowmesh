@@ -6,3 +6,4 @@ export * from './plugin.types';
 export * from './error-handler.types';
 export * from './retry-error';
 export * from './graph.types';
+export * from './state-timeout.exception';

@@ -1,4 +1,12 @@
-import { WorkflowExecution, ExecutionFilter, PersistenceAdapter, LockAdapter, LoggerAdapter, IWorkflowPlugin } from '../types';
+import {
+  WorkflowExecution,
+  ExecutionFilter,
+  PersistenceAdapter,
+  LockAdapter,
+  LoggerAdapter,
+  IWorkflowPlugin,
+  WorkflowMetadataConfig,
+} from '../types';
 import { WorkflowExecutor, ExecutionOptions, ResumeOptions } from './workflow-executor';
 import { ConcurrencyManager } from './concurrency-manager';
 import { StateRegistry } from './state-registry';
@@ -34,9 +42,22 @@ export class WorkflowEngine {
 
     const workflowInstance = this.config.instanceFactory ? this.config.instanceFactory(workflowClass) : new workflowClass();
 
+    // Resolve ErrorHandler class to instance if needed
+    let resolvedErrorHandler: typeof metadata.errorHandler = metadata.errorHandler;
+    if (resolvedErrorHandler && typeof resolvedErrorHandler === 'function') {
+      resolvedErrorHandler = this.config.instanceFactory
+        ? this.config.instanceFactory(resolvedErrorHandler as any)
+        : new (resolvedErrorHandler as any)();
+    }
+
+    const resolvedMetadata: WorkflowMetadataConfig = {
+      ...metadata,
+      errorHandler: resolvedErrorHandler as any,
+    };
+
     const executor = new WorkflowExecutor(
       workflowInstance,
-      metadata,
+      resolvedMetadata,
       this.config.persistence,
       this.concurrencyManager,
       this.config.logger,

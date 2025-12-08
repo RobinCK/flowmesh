@@ -1,5 +1,13 @@
 import { IState, WorkflowContext, StateActions, LoggerAdapter } from '../types';
-import { getStateOnStart, getStateOnSuccess, getStateOnFailure, getStateOnFinish } from '../decorators';
+import {
+  getStateOnStart,
+  getStateOnSuccess,
+  getStateOnFailure,
+  getStateOnFinish,
+  getStateTimeout,
+  getStateDelay,
+} from '../decorators';
+import { StateTimeoutException } from '../types/state-timeout.exception';
 
 export enum ExecutionAction {
   NEXT = 'next',
@@ -34,14 +42,17 @@ export class StateExecutor {
     const startTime = Date.now();
     const result: ExecutionResult<keyof TOutputs> = { action: ExecutionAction.NEXT };
 
+    // Get timeout from decorator
+    const timeout = getStateTimeout(state.constructor);
+
     try {
-      await this.callLifecycleHook(state, 'onStart', context);
-
-      const actions = this.createActions<TData, TOutputs, TCurrentState>(result);
-
-      await state.execute(context, actions);
-
-      await this.callLifecycleHook(state, 'onSuccess', context, result.output);
+      if (timeout) {
+        // Execute with timeout enforcement
+        await this.executeWithTimeout(state, context, currentState, result, timeout, startTime);
+      } else {
+        // Execute without timeout
+        await this.executeWithoutTimeout(state, context, currentState, result, startTime);
+      }
 
       this.logger?.debug(`State ${String(currentState)} executed successfully in ${Date.now() - startTime}ms`);
     } catch (error) {
@@ -70,6 +81,69 @@ export class StateExecutor {
     }
 
     return result;
+  }
+
+  private async executeWithTimeout<
+    TData extends Record<string, unknown>,
+    TOutputs extends Record<string, unknown>,
+    TCurrentState extends keyof TOutputs,
+  >(
+    state: IState<TData, TOutputs, TCurrentState>,
+    context: WorkflowContext<TData, TOutputs>,
+    currentState: TCurrentState,
+    result: ExecutionResult<keyof TOutputs>,
+    timeout: number,
+    startTime: number
+  ): Promise<void> {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        const elapsed = Date.now() - startTime;
+        reject(new StateTimeoutException(String(currentState), timeout, elapsed));
+      }, timeout);
+    });
+
+    await Promise.race([this.executeStateLogic(state, context, result), timeoutPromise]);
+  }
+
+  private async executeWithoutTimeout<
+    TData extends Record<string, unknown>,
+    TOutputs extends Record<string, unknown>,
+    TCurrentState extends keyof TOutputs,
+  >(
+    state: IState<TData, TOutputs, TCurrentState>,
+    context: WorkflowContext<TData, TOutputs>,
+    currentState: TCurrentState,
+    result: ExecutionResult<keyof TOutputs>,
+    _startTime: number
+  ): Promise<void> {
+    await this.executeStateLogic(state, context, result);
+  }
+
+  private async executeStateLogic<
+    TData extends Record<string, unknown>,
+    TOutputs extends Record<string, unknown>,
+    TCurrentState extends keyof TOutputs,
+  >(
+    state: IState<TData, TOutputs, TCurrentState>,
+    context: WorkflowContext<TData, TOutputs>,
+    result: ExecutionResult<keyof TOutputs>
+  ): Promise<void> {
+    // Get delay from decorator
+    const delay = getStateDelay(state.constructor);
+
+    // Wait before executing if delay is configured
+    if (delay) {
+      this.logger?.debug(`Delaying state execution by ${delay}ms`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    await this.callLifecycleHook(state, 'onStart', context);
+
+    const actions = this.createActions<TData, TOutputs, TCurrentState>(result);
+
+    await state.execute(context, actions);
+
+    await this.callLifecycleHook(state, 'onSuccess', context, result.output);
   }
 
   private createActions<
