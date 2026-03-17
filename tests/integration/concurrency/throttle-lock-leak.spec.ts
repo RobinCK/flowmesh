@@ -47,30 +47,21 @@ class LeakTestWorkflow {}
 @State(LeakState.START)
 @UnlockAfter()
 class StartState implements IState<LeakData, LeakOutputs, LeakState.START> {
-  execute(
-    ctx: WorkflowContext<LeakData, LeakOutputs>,
-    actions: StateActions<LeakData, LeakOutputs, LeakState.START>
-  ) {
+  execute(ctx: WorkflowContext<LeakData, LeakOutputs>, actions: StateActions<LeakData, LeakOutputs, LeakState.START>) {
     actions.next({ output: { started: true } });
   }
 }
 
 @State(LeakState.PROCESS)
 class ProcessState implements IState<LeakData, LeakOutputs, LeakState.PROCESS> {
-  execute(
-    ctx: WorkflowContext<LeakData, LeakOutputs>,
-    actions: StateActions<LeakData, LeakOutputs, LeakState.PROCESS>
-  ) {
+  execute(ctx: WorkflowContext<LeakData, LeakOutputs>, actions: StateActions<LeakData, LeakOutputs, LeakState.PROCESS>) {
     actions.suspend({ output: { processed: true }, waitingFor: 'webhook' });
   }
 }
 
 @State(LeakState.END)
 class EndState implements IState<LeakData, LeakOutputs, LeakState.END> {
-  execute(
-    ctx: WorkflowContext<LeakData, LeakOutputs>,
-    actions: StateActions<LeakData, LeakOutputs, LeakState.END>
-  ) {
+  execute(ctx: WorkflowContext<LeakData, LeakOutputs>, actions: StateActions<LeakData, LeakOutputs, LeakState.END>) {
     actions.next({ output: { completed: true } });
   }
 }
