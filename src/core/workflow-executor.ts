@@ -142,11 +142,11 @@ export class WorkflowExecutor<
       }
     }
 
-    if (this.persistence) {
-      await this.persistence.save(execution);
-    }
-
     try {
+      if (this.persistence) {
+        await this.persistence.save(execution);
+      }
+
       await this.callWorkflowLifecycleHook('onStart', context);
 
       const result = await this.executeWorkflow(context, execution);
@@ -229,66 +229,66 @@ export class WorkflowExecutor<
     execution.data = context.data;
     execution.metadata.updatedAt = new Date();
 
-    if (strategy === ResumeStrategy.SKIP) {
-      const nextState = await this.getNextState(context.currentState, context);
+    try {
+      if (strategy === ResumeStrategy.SKIP) {
+        const nextState = await this.getNextState(context.currentState, context);
 
-      if (!nextState) {
-        execution.status = WorkflowStatus.COMPLETED;
-        execution.metadata.completedAt = new Date();
-        execution.metadata.updatedAt = new Date();
+        if (!nextState) {
+          execution.status = WorkflowStatus.COMPLETED;
+          execution.metadata.completedAt = new Date();
+          execution.metadata.updatedAt = new Date();
 
-        await this.persistence.update(execution.id, execution);
+          await this.persistence.update(execution.id, execution);
 
-        if (execution.groupId && this.concurrencyManager) {
-          await this.concurrencyManager.releaseGroupLock(execution.groupId, execution.id);
+          if (execution.groupId && this.concurrencyManager) {
+            await this.concurrencyManager.releaseGroupLock(execution.groupId, execution.id);
+          }
+
+          return execution as WorkflowExecution<TData>;
         }
 
-        return execution as WorkflowExecution<TData>;
+        const transition: StateTransition<keyof TOutputs> = {
+          from: context.currentState,
+          to: nextState,
+          startedAt: new Date(),
+          completedAt: new Date(),
+          duration: 0,
+          status: 'success',
+        };
+
+        context.history.push(transition);
+        context.currentState = nextState;
+        execution.currentState = String(nextState);
+        execution.history = context.history;
+      } else if (strategy === ResumeStrategy.GOTO) {
+        if (!options?.targetState) {
+          throw new Error('targetState is required for GOTO strategy');
+        }
+
+        const targetState = options.targetState as keyof TOutputs;
+        const StateClass = StateRegistry.get(targetState);
+
+        if (!StateClass) {
+          throw new Error(`Target state not found: ${String(targetState)}`);
+        }
+
+        const transition: StateTransition<keyof TOutputs> = {
+          from: context.currentState,
+          to: targetState,
+          startedAt: new Date(),
+          completedAt: new Date(),
+          duration: 0,
+          status: 'success',
+        };
+
+        context.history.push(transition);
+        context.currentState = targetState;
+        execution.currentState = String(targetState);
+        execution.history = context.history;
       }
 
-      const transition: StateTransition<keyof TOutputs> = {
-        from: context.currentState,
-        to: nextState,
-        startedAt: new Date(),
-        completedAt: new Date(),
-        duration: 0,
-        status: 'success',
-      };
+      await this.persistence.update(execution.id, execution);
 
-      context.history.push(transition);
-      context.currentState = nextState;
-      execution.currentState = String(nextState);
-      execution.history = context.history;
-    } else if (strategy === ResumeStrategy.GOTO) {
-      if (!options?.targetState) {
-        throw new Error('targetState is required for GOTO strategy');
-      }
-
-      const targetState = options.targetState as keyof TOutputs;
-      const StateClass = StateRegistry.get(targetState);
-
-      if (!StateClass) {
-        throw new Error(`Target state not found: ${String(targetState)}`);
-      }
-
-      const transition: StateTransition<keyof TOutputs> = {
-        from: context.currentState,
-        to: targetState,
-        startedAt: new Date(),
-        completedAt: new Date(),
-        duration: 0,
-        status: 'success',
-      };
-
-      context.history.push(transition);
-      context.currentState = targetState;
-      execution.currentState = String(targetState);
-      execution.history = context.history;
-    }
-
-    await this.persistence.update(execution.id, execution);
-
-    try {
       const result = await this.executeWorkflow(context, execution);
 
       if (execution.groupId && this.concurrencyManager && result.status !== WorkflowStatus.SUSPENDED) {
