@@ -191,4 +191,74 @@ describe('Integration: Throttle Lock Leak', () => {
     expect(results[0].status).toBe(WorkflowStatus.SUSPENDED);
     expect(results[1].status).toBe(WorkflowStatus.SUSPENDED);
   });
+
+  it('should release throttle slot when execution suspends', async () => {
+    const engine = createEngine(persistence);
+
+    for (let i = 0; i < 2; i++) {
+      const result = await engine.execute(LeakTestWorkflow, {
+        data: { userId: 'user1', value: i },
+      });
+
+      expect(result.status).toBe(WorkflowStatus.SUSPENDED);
+    }
+
+    const blockedExecution: WorkflowExecution = {
+      id: 'blocked-resume-execution',
+      workflowName: 'LeakTestWorkflow',
+      groupId: 'user1',
+      currentState: LeakState.PROCESS,
+      status: WorkflowStatus.SUSPENDED,
+      data: { userId: 'user1', value: 99 },
+      outputs: {
+        [LeakState.START]: { started: true },
+      },
+      history: [],
+      suspension: {
+        waitingFor: 'webhook',
+        suspendedAt: new Date(),
+      },
+      metadata: {
+        startedAt: new Date(),
+        updatedAt: new Date(),
+        totalAttempts: 0,
+      },
+    };
+
+    await persistence.save(blockedExecution);
+
+    await expect(engine.resume(LeakTestWorkflow, blockedExecution.id)).resolves.toMatchObject({
+      id: blockedExecution.id,
+      status: WorkflowStatus.SUSPENDED,
+    });
+  });
+
+  it('should allow force releasing a stuck group lock', async () => {
+    const engine = createEngine(persistence);
+    const concurrencyManager = (engine as any).concurrencyManager;
+
+    engine.registerWorkflow(LeakTestWorkflow);
+
+    await concurrencyManager.acquireGroupLock('user1', 'ghost-1', {
+      groupBy: 'userId',
+      mode: ConcurrencyMode.THROTTLE,
+      maxConcurrentAfterUnlock: 2,
+    });
+    await concurrencyManager.acquireGroupLock('user1', 'ghost-2', {
+      groupBy: 'userId',
+      mode: ConcurrencyMode.THROTTLE,
+      maxConcurrentAfterUnlock: 2,
+    });
+
+    const forced = await engine.forceReleaseGroupLock(LeakTestWorkflow, 'user1');
+
+    expect(forced.groupId).toBe('user1');
+    expect(forced.clearedExecutions).toHaveLength(2);
+
+    const next = await engine.execute(LeakTestWorkflow, {
+      data: { userId: 'user1', value: 100 },
+    });
+
+    expect(next.status).toBe(WorkflowStatus.SUSPENDED);
+  });
 });

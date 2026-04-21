@@ -87,4 +87,11 @@ export abstract class ExecutableWorkflow<TData extends Record<string, unknown> =
     const engine = this.getEngine();
     return engine.getExecution(executionId) as Promise<WorkflowExecution<TData> | null>;
   }
+
+  async forceReleaseGroupLock(
+    groupId: string
+  ): Promise<{ workflowName: string; groupId: string; clearedExecutions: string[]; hadHardLock: boolean }> {
+    const engine = this.getEngine();
+    return engine.forceReleaseGroupLock(this.constructor as any, groupId);
+  }
 }

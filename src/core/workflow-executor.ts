@@ -10,6 +10,7 @@ import {
   ErrorHandlingDecision,
   ErrorPhase,
   RetryExhaustedException,
+  ConcurrencyMode,
 } from '../types';
 import { StateExecutor, ExecutionAction, ExecutionResult } from './state-executor';
 import { StateRegistry } from './state-registry';
@@ -83,6 +84,7 @@ export class WorkflowExecutor<
   TOutputs extends Record<string, unknown> = Record<string, unknown>,
 > {
   private stateExecutor: StateExecutor;
+  private readonly executorId = Math.random().toString(36).slice(2, 10);
 
   constructor(
     private readonly workflowInstance: any,
@@ -131,14 +133,40 @@ export class WorkflowExecutor<
       const acquired = await this.concurrencyManager.acquireGroupLock(groupId, executionId, this.metadata.concurrency);
 
       if (!acquired) {
-        const lockError = new Error(`Cannot acquire lock for group ${groupId}`);
-        const handlerResult = await this.handleErrorWithHandler(lockError, 'lock_acquisition', context, execution);
+        if (this.persistence && this.metadata.concurrency?.mode === ConcurrencyMode.THROTTLE) {
+          await this.concurrencyManager.reconcileGroupLock(groupId, this.persistence, this.metadata.name);
+          const retried = await this.concurrencyManager.acquireGroupLock(groupId, executionId, this.metadata.concurrency);
 
-        if (handlerResult.decision === ErrorHandlingDecision.EXIT || handlerResult.decision === ErrorHandlingDecision.CONTINUE) {
-          return execution;
+          if (retried) {
+            this.logger?.warn(
+              `Recovered stale group lock during execute: workflow=${this.metadata.name}, groupId=${groupId}, executionId=${executionId}, executorId=${this.executorId}, managerId=${this.concurrencyManager.getManagerId()}`
+            );
+          } else {
+            const lockError = new Error(`Cannot acquire lock for group ${groupId}`);
+            const handlerResult = await this.handleErrorWithHandler(lockError, 'lock_acquisition', context, execution);
+
+            if (
+              handlerResult.decision === ErrorHandlingDecision.EXIT ||
+              handlerResult.decision === ErrorHandlingDecision.CONTINUE
+            ) {
+              return execution;
+            }
+
+            throw lockError;
+          }
+        } else {
+          const lockError = new Error(`Cannot acquire lock for group ${groupId}`);
+          const handlerResult = await this.handleErrorWithHandler(lockError, 'lock_acquisition', context, execution);
+
+          if (
+            handlerResult.decision === ErrorHandlingDecision.EXIT ||
+            handlerResult.decision === ErrorHandlingDecision.CONTINUE
+          ) {
+            return execution;
+          }
+
+          throw lockError;
         }
-
-        throw lockError;
       }
     }
 
@@ -220,7 +248,24 @@ export class WorkflowExecutor<
       const acquired = await this.concurrencyManager.acquireGroupLock(execution.groupId, execution.id, this.metadata.concurrency);
 
       if (!acquired) {
-        throw new Error(`Cannot acquire lock for group ${execution.groupId} during resume`);
+        if (this.persistence && this.metadata.concurrency.mode === ConcurrencyMode.THROTTLE) {
+          await this.concurrencyManager.reconcileGroupLock(execution.groupId, this.persistence, this.metadata.name);
+          const retried = await this.concurrencyManager.acquireGroupLock(
+            execution.groupId,
+            execution.id,
+            this.metadata.concurrency
+          );
+
+          if (retried) {
+            this.logger?.warn(
+              `Recovered stale group lock during resume: workflow=${this.metadata.name}, groupId=${execution.groupId}, executionId=${execution.id}, executorId=${this.executorId}, managerId=${this.concurrencyManager.getManagerId()}`
+            );
+          } else {
+            throw new Error(`Cannot acquire lock for group ${execution.groupId} during resume`);
+          }
+        } else {
+          throw new Error(`Cannot acquire lock for group ${execution.groupId} during resume`);
+        }
       }
     }
 
@@ -492,6 +537,10 @@ export class WorkflowExecutor<
 
         if (this.persistence) {
           await this.persistence.update(execution.id, execution);
+        }
+
+        if (execution.groupId && this.concurrencyManager) {
+          await this.concurrencyManager.releaseGroupLock(execution.groupId, execution.id);
         }
 
         return execution;

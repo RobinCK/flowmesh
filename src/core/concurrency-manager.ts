@@ -1,4 +1,12 @@
-import { LockAdapter, WorkflowContext, ConcurrencyConfig, ConcurrencyMode, LoggerAdapter } from '../types';
+import {
+  LockAdapter,
+  WorkflowContext,
+  ConcurrencyConfig,
+  ConcurrencyMode,
+  LoggerAdapter,
+  PersistenceAdapter,
+  WorkflowStatus,
+} from '../types';
 
 interface GroupLockInfo {
   hardLocked: boolean;
@@ -11,6 +19,7 @@ interface GroupLockInfo {
 
 export class ConcurrencyManager {
   private groupLocks: Map<string, GroupLockInfo> = new Map();
+  private readonly managerId = Math.random().toString(36).slice(2, 10);
 
   constructor(
     private readonly lockAdapter: LockAdapter,
@@ -64,13 +73,15 @@ export class ConcurrencyManager {
         !lockInfo.softLock.activeExecutions.has(executionId)
       ) {
         this.logger?.debug(
-          `Group ${groupId} throttle limit reached: ${lockInfo.softLock.activeExecutions.size}/${lockInfo.softLock.maxConcurrent}`
+          `Group ${groupId} throttle limit reached: ${lockInfo.softLock.activeExecutions.size}/${lockInfo.softLock.maxConcurrent}, managerId=${this.managerId}, activeExecutions=${Array.from(lockInfo.softLock.activeExecutions).slice(0, 20).join(',')}`
         );
         return false;
       }
 
       lockInfo.softLock.activeExecutions.add(executionId);
-      this.logger?.debug(`Acquired throttle lock for ${executionId} in group ${groupId}`);
+      this.logger?.debug(
+        `Acquired throttle lock for ${executionId} in group ${groupId}, managerId=${this.managerId}, active=${lockInfo.softLock.activeExecutions.size}/${lockInfo.softLock.maxConcurrent}`
+      );
 
       return true;
     }
@@ -122,12 +133,93 @@ export class ConcurrencyManager {
       this.groupLocks.delete(groupId);
     }
 
-    this.logger?.debug(`Released lock for ${executionId} in group ${groupId}`);
+    this.logger?.debug(
+      `Released lock for ${executionId} in group ${groupId}, managerId=${this.managerId}, active=${lockInfo.softLock.activeExecutions.size}/${lockInfo.softLock.maxConcurrent}`
+    );
 
     if (wasHardLocked) {
       const lockKey = `workflow:group:${groupId}`;
       await this.lockAdapter.release(lockKey);
     }
+  }
+
+  async forceReleaseGroupLock(groupId: string): Promise<{ clearedExecutions: string[]; hadHardLock: boolean }> {
+    const lockInfo = this.groupLocks.get(groupId);
+
+    if (!lockInfo) {
+      this.logger?.warn(`Force release requested for group ${groupId}, but no lock info exists, managerId=${this.managerId}`);
+      return { clearedExecutions: [], hadHardLock: false };
+    }
+
+    const clearedExecutions = Array.from(lockInfo.softLock.activeExecutions);
+    const hadHardLock = lockInfo.hardLocked;
+
+    this.groupLocks.delete(groupId);
+
+    if (hadHardLock) {
+      const lockKey = `workflow:group:${groupId}`;
+      await this.lockAdapter.release(lockKey);
+    }
+
+    this.logger?.warn(
+      `Force released group lock for ${groupId}, managerId=${this.managerId}, cleared=${clearedExecutions.length}, executions=${clearedExecutions.slice(0, 20).join(',')}`
+    );
+
+    return { clearedExecutions, hadHardLock };
+  }
+
+  async reconcileGroupLock(
+    groupId: string,
+    persistence: PersistenceAdapter,
+    workflowName?: string
+  ): Promise<{ removedExecutions: string[]; remainingExecutions: string[] }> {
+    const lockInfo = this.groupLocks.get(groupId);
+
+    if (!lockInfo) {
+      return { removedExecutions: [], remainingExecutions: [] };
+    }
+
+    const activeExecutions = Array.from(lockInfo.softLock.activeExecutions);
+
+    if (activeExecutions.length === 0) {
+      return { removedExecutions: [], remainingExecutions: [] };
+    }
+
+    const persistedExecutions = await persistence.find({
+      groupId,
+      ...(workflowName ? { workflowName } : {}),
+      status: [WorkflowStatus.RUNNING, WorkflowStatus.SUSPENDED],
+    });
+
+    const persistedIds = new Set(persistedExecutions.map(execution => execution.id));
+    const removedExecutions: string[] = [];
+
+    for (const activeExecutionId of activeExecutions) {
+      if (!persistedIds.has(activeExecutionId)) {
+        lockInfo.softLock.activeExecutions.delete(activeExecutionId);
+        removedExecutions.push(activeExecutionId);
+
+        if (lockInfo.currentExecution === activeExecutionId) {
+          lockInfo.currentExecution = undefined;
+          lockInfo.hardLocked = false;
+        }
+      }
+    }
+
+    if (!lockInfo.hardLocked && lockInfo.softLock.activeExecutions.size === 0) {
+      this.groupLocks.delete(groupId);
+    }
+
+    if (removedExecutions.length > 0) {
+      this.logger?.warn(
+        `Reconciled stale executions for group ${groupId}, managerId=${this.managerId}, removed=${removedExecutions.length}, removedExecutions=${removedExecutions.slice(0, 20).join(',')}`
+      );
+    }
+
+    return {
+      removedExecutions,
+      remainingExecutions: Array.from(lockInfo.softLock.activeExecutions),
+    };
   }
 
   getGroupId(context: WorkflowContext, config?: ConcurrencyConfig): string | undefined {
@@ -157,5 +249,9 @@ export class ConcurrencyManager {
     }
 
     return lockInfo;
+  }
+
+  getManagerId(): string {
+    return this.managerId;
   }
 }

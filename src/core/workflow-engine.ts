@@ -127,6 +127,40 @@ export class WorkflowEngine {
     return this.config.persistence.find(filter);
   }
 
+  async forceReleaseGroupLock(
+    workflowClass: new (...args: any[]) => any,
+    groupId: string
+  ): Promise<{ workflowName: string; groupId: string; clearedExecutions: string[]; hadHardLock: boolean }> {
+    const metadata = getWorkflowMetadata(workflowClass);
+
+    if (!metadata) {
+      throw new Error(`Class ${workflowClass.name} is not decorated with @Workflow`);
+    }
+
+    const executor = this.executors.get(metadata.name);
+
+    if (!executor) {
+      throw new Error(`Workflow ${metadata.name} is not registered`);
+    }
+
+    if (!this.concurrencyManager) {
+      return {
+        workflowName: metadata.name,
+        groupId,
+        clearedExecutions: [],
+        hadHardLock: false,
+      };
+    }
+
+    const result = await this.concurrencyManager.forceReleaseGroupLock(groupId);
+
+    return {
+      workflowName: metadata.name,
+      groupId,
+      ...result,
+    };
+  }
+
   getRegisteredWorkflows(): string[] {
     return Array.from(this.executors.keys());
   }
