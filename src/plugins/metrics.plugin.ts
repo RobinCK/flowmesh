@@ -14,10 +14,14 @@ export class MetricsPlugin implements IWorkflowPlugin {
   private metrics: Map<string, StateMetrics> = new Map();
   private stateStartTimes: Map<string, number> = new Map();
 
+  constructor(private readonly staleAfterMs: number = 60 * 60 * 1000) {}
+
   onInit(): void {}
 
   beforeExecute(context: WorkflowContext): void {
     const key = `${context.executionId}-${String(context.currentState)}`;
+
+    this.evictStaleStartTimes();
     this.stateStartTimes.set(key, Date.now());
   }
 
@@ -54,6 +58,20 @@ export class MetricsPlugin implements IWorkflowPlugin {
   clearMetrics(): void {
     this.metrics.clear();
     this.stateStartTimes.clear();
+  }
+
+  /**
+   * A state that never reaches afterExecute or onError (for example when an error handler
+   * exits the workflow) would otherwise keep its start timestamp forever.
+   */
+  private evictStaleStartTimes(): void {
+    const threshold = Date.now() - this.staleAfterMs;
+
+    for (const [key, startedAt] of this.stateStartTimes.entries()) {
+      if (startedAt < threshold) {
+        this.stateStartTimes.delete(key);
+      }
+    }
   }
 
   private recordMetric(state: string, duration: number, success: boolean): void {

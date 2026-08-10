@@ -159,7 +159,7 @@ describe('Integration: Sequential Mode', () => {
     });
 
     // Lock should be released, check adapter
-    const isLocked = await lockAdapter.isLocked('workflow:group:user1');
+    const isLocked = await lockAdapter.isLocked('workflow:SequentialWorkflow:group:user1');
     expect(isLocked).toBe(false);
   });
 });

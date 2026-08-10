@@ -1,5 +1,12 @@
 import 'reflect-metadata';
-import { WorkflowMetadataConfig, ConcurrencyConfig, TransitionConfig, ConditionalTransition, ErrorHandler } from '../types';
+import {
+  WorkflowMetadataConfig,
+  ConcurrencyConfig,
+  TransitionConfig,
+  ConditionalTransition,
+  ErrorHandler,
+  StateHandler,
+} from '../types';
 
 export const WORKFLOW_METADATA_KEY = Symbol.for('flowmesh:workflow');
 
@@ -11,6 +18,7 @@ export interface WorkflowDecoratorOptions<TState = unknown> {
   transitions?: TransitionConfig<TState>[];
   conditionalTransitions?: ConditionalTransition<TState>[];
   errorHandler?: ErrorHandler | (new (...args: any[]) => ErrorHandler);
+  stateHandlers?: StateHandler[];
 }
 
 export function Workflow<TState>(options: WorkflowDecoratorOptions<TState>): ClassDecorator {
@@ -23,6 +31,7 @@ export function Workflow<TState>(options: WorkflowDecoratorOptions<TState>): Cla
       transitions: options.transitions,
       conditionalTransitions: options.conditionalTransitions,
       errorHandler: options.errorHandler,
+      stateHandlers: options.stateHandlers,
     };
 
     Reflect.defineMetadata(WORKFLOW_METADATA_KEY, metadata, target);

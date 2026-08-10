@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { readCachedMetadata } from './metadata-cache';
 
 export const WORKFLOW_ON_START_KEY = Symbol.for('flowmesh:workflow:onStart');
 export const WORKFLOW_ON_COMPLETE_KEY = Symbol.for('flowmesh:workflow:onComplete');
@@ -66,37 +67,37 @@ export function OnStateFinish(): MethodDecorator {
 }
 
 export function getWorkflowOnStart(target: any): string | symbol | undefined {
-  return Reflect.getMetadata(WORKFLOW_ON_START_KEY, target);
+  return readCachedMetadata(WORKFLOW_ON_START_KEY, target, () => Reflect.getMetadata(WORKFLOW_ON_START_KEY, target));
 }
 
 export function getWorkflowOnComplete(target: any): string | symbol | undefined {
-  return Reflect.getMetadata(WORKFLOW_ON_COMPLETE_KEY, target);
+  return readCachedMetadata(WORKFLOW_ON_COMPLETE_KEY, target, () => Reflect.getMetadata(WORKFLOW_ON_COMPLETE_KEY, target));
 }
 
 export function getWorkflowOnError(target: any): string | symbol | undefined {
-  return Reflect.getMetadata(WORKFLOW_ON_ERROR_KEY, target);
+  return readCachedMetadata(WORKFLOW_ON_ERROR_KEY, target, () => Reflect.getMetadata(WORKFLOW_ON_ERROR_KEY, target));
 }
 
 export function getWorkflowBeforeState(target: any): string | symbol | undefined {
-  return Reflect.getMetadata(WORKFLOW_BEFORE_STATE_KEY, target);
+  return readCachedMetadata(WORKFLOW_BEFORE_STATE_KEY, target, () => Reflect.getMetadata(WORKFLOW_BEFORE_STATE_KEY, target));
 }
 
 export function getWorkflowAfterState(target: any): string | symbol | undefined {
-  return Reflect.getMetadata(WORKFLOW_AFTER_STATE_KEY, target);
+  return readCachedMetadata(WORKFLOW_AFTER_STATE_KEY, target, () => Reflect.getMetadata(WORKFLOW_AFTER_STATE_KEY, target));
 }
 
 export function getStateOnStart(target: any): string | symbol | undefined {
-  return Reflect.getMetadata(STATE_ON_START_KEY, target);
+  return readCachedMetadata(STATE_ON_START_KEY, target, () => Reflect.getMetadata(STATE_ON_START_KEY, target));
 }
 
 export function getStateOnSuccess(target: any): string | symbol | undefined {
-  return Reflect.getMetadata(STATE_ON_SUCCESS_KEY, target);
+  return readCachedMetadata(STATE_ON_SUCCESS_KEY, target, () => Reflect.getMetadata(STATE_ON_SUCCESS_KEY, target));
 }
 
 export function getStateOnFailure(target: any): string | symbol | undefined {
-  return Reflect.getMetadata(STATE_ON_FAILURE_KEY, target);
+  return readCachedMetadata(STATE_ON_FAILURE_KEY, target, () => Reflect.getMetadata(STATE_ON_FAILURE_KEY, target));
 }
 
 export function getStateOnFinish(target: any): string | symbol | undefined {
-  return Reflect.getMetadata(STATE_ON_FINISH_KEY, target);
+  return readCachedMetadata(STATE_ON_FINISH_KEY, target, () => Reflect.getMetadata(STATE_ON_FINISH_KEY, target));
 }

@@ -16,6 +16,10 @@ export enum ExecutionAction {
   COMPLETE = 'complete',
 }
 
+interface SettlementGuard {
+  settled: boolean;
+}
+
 export interface ExecutionResult<TState = unknown> {
   action: ExecutionAction;
   targetState?: TState;
@@ -41,6 +45,7 @@ export class StateExecutor {
   ): Promise<ExecutionResult<keyof TOutputs>> {
     const startTime = Date.now();
     const result: ExecutionResult<keyof TOutputs> = { action: ExecutionAction.NEXT };
+    const guard: SettlementGuard = { settled: false };
 
     // Get timeout from decorator
     const timeout = getStateTimeout(state.constructor);
@@ -48,10 +53,10 @@ export class StateExecutor {
     try {
       if (timeout) {
         // Execute with timeout enforcement
-        await this.executeWithTimeout(state, context, currentState, result, timeout, startTime);
+        await this.executeWithTimeout(state, context, currentState, result, timeout, startTime, guard);
       } else {
         // Execute without timeout
-        await this.executeWithoutTimeout(state, context, currentState, result, startTime);
+        await this.executeWithoutTimeout(state, context, currentState, result, startTime, guard);
       }
 
       this.logger?.debug(`State ${String(currentState)} executed successfully in ${Date.now() - startTime}ms`);
@@ -77,6 +82,7 @@ export class StateExecutor {
 
       throw finalError;
     } finally {
+      guard.settled = true;
       await this.callLifecycleHook(state, 'onFinish', context);
     }
 
@@ -93,16 +99,23 @@ export class StateExecutor {
     currentState: TCurrentState,
     result: ExecutionResult<keyof TOutputs>,
     timeout: number,
-    startTime: number
+    startTime: number,
+    guard: SettlementGuard
   ): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
+      timer = setTimeout(() => {
         const elapsed = Date.now() - startTime;
         reject(new StateTimeoutException(String(currentState), timeout, elapsed));
       }, timeout);
     });
 
-    await Promise.race([this.executeStateLogic(state, context, result), timeoutPromise]);
+    try {
+      await Promise.race([this.executeStateLogic(state, context, result, currentState, guard), timeoutPromise]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async executeWithoutTimeout<
@@ -114,9 +127,10 @@ export class StateExecutor {
     context: WorkflowContext<TData, TOutputs>,
     currentState: TCurrentState,
     result: ExecutionResult<keyof TOutputs>,
-    _startTime: number
+    _startTime: number,
+    guard: SettlementGuard
   ): Promise<void> {
-    await this.executeStateLogic(state, context, result);
+    await this.executeStateLogic(state, context, result, currentState, guard);
   }
 
   private async executeStateLogic<
@@ -126,7 +140,9 @@ export class StateExecutor {
   >(
     state: IState<TData, TOutputs, TCurrentState>,
     context: WorkflowContext<TData, TOutputs>,
-    result: ExecutionResult<keyof TOutputs>
+    result: ExecutionResult<keyof TOutputs>,
+    currentState: TCurrentState,
+    guard: SettlementGuard
   ): Promise<void> {
     // Get delay from decorator
     const delay = getStateDelay(state.constructor);
@@ -139,9 +155,15 @@ export class StateExecutor {
 
     await this.callLifecycleHook(state, 'onStart', context);
 
-    const actions = this.createActions<TData, TOutputs, TCurrentState>(result);
+    const actions = this.createActions<TData, TOutputs, TCurrentState>(result, currentState, guard);
 
     await state.execute(context, actions);
+
+    if (guard.settled) {
+      this.logger?.warn(`State ${String(currentState)} resolved after it had already settled (timeout), skipping onSuccess hook`);
+
+      return;
+    }
 
     await this.callLifecycleHook(state, 'onSuccess', context, result.output);
   }
@@ -150,45 +172,67 @@ export class StateExecutor {
     TData extends Record<string, unknown>,
     TOutputs extends Record<string, unknown>,
     TCurrentState extends keyof TOutputs,
-  >(result: ExecutionResult<keyof TOutputs>): StateActions<TData, TOutputs, TCurrentState> {
+  >(
+    result: ExecutionResult<keyof TOutputs>,
+    currentState: TCurrentState,
+    guard: SettlementGuard
+  ): StateActions<TData, TOutputs, TCurrentState> {
+    const isStale = (action: string): boolean => {
+      if (!guard.settled) {
+        return false;
+      }
+
+      this.logger?.warn(
+        `State ${String(currentState)} called actions.${action}() after it had already settled (timeout), ignoring`
+      );
+
+      return true;
+    };
+
+    const assign = (data?: { data?: Partial<TData>; output?: unknown }): void => {
+      if (data?.data) {
+        result.data = data.data;
+      }
+
+      if (data && 'output' in data) {
+        result.output = data.output;
+      }
+    };
+
     return {
       next: data => {
+        if (isStale('next')) {
+          return;
+        }
+
         result.action = ExecutionAction.NEXT;
-        if (data?.data) {
-          result.data = data.data;
-        }
-        if (data?.output) {
-          result.output = data.output;
-        }
+        assign(data);
       },
       goto: (state, data) => {
+        if (isStale('goto')) {
+          return;
+        }
+
         result.action = ExecutionAction.GOTO;
         result.targetState = state;
-        if (data?.data) {
-          result.data = data.data;
-        }
-        if (data?.output) {
-          result.output = data.output;
-        }
+        assign(data);
       },
       suspend: data => {
+        if (isStale('suspend')) {
+          return;
+        }
+
         result.action = ExecutionAction.SUSPEND;
-        if (data?.data) {
-          result.data = data.data;
-        }
-        if (data?.output) {
-          result.output = data.output;
-        }
+        assign(data);
         result.suspensionMetadata = { waitingFor: data?.waitingFor };
       },
       complete: data => {
+        if (isStale('complete')) {
+          return;
+        }
+
         result.action = ExecutionAction.COMPLETE;
-        if (data?.data) {
-          result.data = data.data;
-        }
-        if (data?.output) {
-          result.output = data.output;
-        }
+        assign(data);
       },
     };
   }

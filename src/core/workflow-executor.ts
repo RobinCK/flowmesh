@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   WorkflowContext,
   WorkflowExecution,
@@ -11,6 +12,9 @@ import {
   ErrorPhase,
   RetryExhaustedException,
   ConcurrencyMode,
+  TransitionConfig,
+  ConditionalTransition,
+  StateHandler,
 } from '../types';
 import { StateExecutor, ExecutionAction, ExecutionResult } from './state-executor';
 import { StateRegistry } from './state-registry';
@@ -23,6 +27,7 @@ import {
   getWorkflowAfterState,
   getStateConcurrency,
   getStateRetry,
+  getStateMetadata,
 } from '../decorators';
 
 export interface ExecutionOptions<TData extends Record<string, unknown> = Record<string, unknown>> {
@@ -84,7 +89,12 @@ export class WorkflowExecutor<
   TOutputs extends Record<string, unknown> = Record<string, unknown>,
 > {
   private stateExecutor: StateExecutor;
-  private readonly executorId = Math.random().toString(36).slice(2, 10);
+  private pluginsInitialized = false;
+  private readonly executorId = randomUUID();
+  private readonly transitionsByState = new Map<unknown, TransitionConfig<unknown>[]>();
+  private readonly conditionalTransitionsByState = new Map<unknown, ConditionalTransition<unknown>[]>();
+  private readonly stateOrder: unknown[];
+  private readonly stateHandlers = new Map<unknown, StateHandler>();
 
   constructor(
     private readonly workflowInstance: any,
@@ -95,6 +105,46 @@ export class WorkflowExecutor<
     private readonly plugins: IWorkflowPlugin[] = []
   ) {
     this.stateExecutor = new StateExecutor(logger);
+    this.stateOrder = Object.values(this.metadata.states);
+
+    for (const handler of this.metadata.stateHandlers || []) {
+      const stateMetadata = getStateMetadata(typeof handler === 'function' ? handler : handler.constructor);
+
+      if (!stateMetadata) {
+        throw new Error(
+          `Workflow ${this.metadata.name} declares a state handler that is not decorated with @State: ` +
+            `${typeof handler === 'function' ? handler.name : handler.constructor.name}`
+        );
+      }
+
+      for (const stateValue of stateMetadata.states) {
+        this.stateHandlers.set(stateValue, handler);
+      }
+    }
+
+    for (const transition of this.metadata.transitions || []) {
+      const fromStates = Array.isArray(transition.from) ? transition.from : [transition.from];
+
+      for (const from of fromStates as unknown[]) {
+        const existing = this.transitionsByState.get(from);
+
+        if (existing) {
+          existing.push(transition as TransitionConfig<unknown>);
+        } else {
+          this.transitionsByState.set(from, [transition as TransitionConfig<unknown>]);
+        }
+      }
+    }
+
+    for (const group of this.metadata.conditionalTransitions || []) {
+      const existing = this.conditionalTransitionsByState.get(group.from);
+
+      if (existing) {
+        existing.push(group as ConditionalTransition<unknown>);
+      } else {
+        this.conditionalTransitionsByState.set(group.from, [group as ConditionalTransition<unknown>]);
+      }
+    }
   }
 
   async execute(options: ExecutionOptions<TData>): Promise<WorkflowExecution<TData>> {
@@ -130,12 +180,22 @@ export class WorkflowExecutor<
     };
 
     if (groupId && this.concurrencyManager && this.metadata.concurrency) {
-      const acquired = await this.concurrencyManager.acquireGroupLock(groupId, executionId, this.metadata.concurrency);
+      const acquired = await this.concurrencyManager.acquireGroupLock(
+        groupId,
+        executionId,
+        this.metadata.concurrency,
+        this.metadata.name
+      );
 
       if (!acquired) {
         if (this.persistence && this.metadata.concurrency?.mode === ConcurrencyMode.THROTTLE) {
           await this.concurrencyManager.reconcileGroupLock(groupId, this.persistence, this.metadata.name);
-          const retried = await this.concurrencyManager.acquireGroupLock(groupId, executionId, this.metadata.concurrency);
+          const retried = await this.concurrencyManager.acquireGroupLock(
+            groupId,
+            executionId,
+            this.metadata.concurrency,
+            this.metadata.name
+          );
 
           if (retried) {
             this.logger?.warn(
@@ -184,14 +244,14 @@ export class WorkflowExecutor<
       }
 
       if (groupId && this.concurrencyManager && result.status !== WorkflowStatus.SUSPENDED) {
-        await this.concurrencyManager.releaseGroupLock(groupId, executionId);
+        await this.concurrencyManager.releaseGroupLock(groupId, executionId, this.metadata.name);
       }
 
       return result as WorkflowExecution<TData>;
     } catch (error) {
       if (execution.status === WorkflowStatus.FAILED) {
         if (groupId && this.concurrencyManager) {
-          await this.concurrencyManager.releaseGroupLock(groupId, executionId);
+          await this.concurrencyManager.releaseGroupLock(groupId, executionId, this.metadata.name);
         }
 
         throw error;
@@ -207,7 +267,7 @@ export class WorkflowExecutor<
       }
 
       if (groupId && this.concurrencyManager) {
-        await this.concurrencyManager.releaseGroupLock(groupId, executionId);
+        await this.concurrencyManager.releaseGroupLock(groupId, executionId, this.metadata.name);
       }
 
       await this.processErrorDecision(handlerResult.decision, error as Error, context, execution);
@@ -245,7 +305,12 @@ export class WorkflowExecutor<
     };
 
     if (execution.groupId && this.concurrencyManager && this.metadata.concurrency) {
-      const acquired = await this.concurrencyManager.acquireGroupLock(execution.groupId, execution.id, this.metadata.concurrency);
+      const acquired = await this.concurrencyManager.acquireGroupLock(
+        execution.groupId,
+        execution.id,
+        this.metadata.concurrency,
+        this.metadata.name
+      );
 
       if (!acquired) {
         if (this.persistence && this.metadata.concurrency.mode === ConcurrencyMode.THROTTLE) {
@@ -253,7 +318,8 @@ export class WorkflowExecutor<
           const retried = await this.concurrencyManager.acquireGroupLock(
             execution.groupId,
             execution.id,
-            this.metadata.concurrency
+            this.metadata.concurrency,
+            this.metadata.name
           );
 
           if (retried) {
@@ -275,6 +341,17 @@ export class WorkflowExecutor<
     execution.metadata.updatedAt = new Date();
 
     try {
+      // The status check above is read-then-act, so two concurrent resumes can both pass it.
+      // Adapters that support it claim the execution atomically here; the loser stops before
+      // writing its now stale snapshot over the winner's progress.
+      if (this.persistence.claimSuspended) {
+        const claimed = await this.persistence.claimSuspended(execution.id);
+
+        if (!claimed) {
+          throw new Error(`Execution ${executionId} is not suspended`);
+        }
+      }
+
       if (strategy === ResumeStrategy.SKIP) {
         const nextState = await this.getNextState(context.currentState, context);
 
@@ -286,7 +363,7 @@ export class WorkflowExecutor<
           await this.persistence.update(execution.id, execution);
 
           if (execution.groupId && this.concurrencyManager) {
-            await this.concurrencyManager.releaseGroupLock(execution.groupId, execution.id);
+            await this.concurrencyManager.releaseGroupLock(execution.groupId, execution.id, this.metadata.name);
           }
 
           return execution as WorkflowExecution<TData>;
@@ -311,7 +388,7 @@ export class WorkflowExecutor<
         }
 
         const targetState = options.targetState as keyof TOutputs;
-        const StateClass = StateRegistry.get(targetState);
+        const StateClass = this.resolveState(targetState);
 
         if (!StateClass) {
           throw new Error(`Target state not found: ${String(targetState)}`);
@@ -337,13 +414,13 @@ export class WorkflowExecutor<
       const result = await this.executeWorkflow(context, execution);
 
       if (execution.groupId && this.concurrencyManager && result.status !== WorkflowStatus.SUSPENDED) {
-        await this.concurrencyManager.releaseGroupLock(execution.groupId, execution.id);
+        await this.concurrencyManager.releaseGroupLock(execution.groupId, execution.id, this.metadata.name);
       }
 
       return result as WorkflowExecution<TData>;
     } catch (error) {
       if (execution.groupId && this.concurrencyManager) {
-        await this.concurrencyManager.releaseGroupLock(execution.groupId, execution.id);
+        await this.concurrencyManager.releaseGroupLock(execution.groupId, execution.id, this.metadata.name);
       }
 
       throw error;
@@ -355,7 +432,7 @@ export class WorkflowExecutor<
     execution: WorkflowExecution
   ): Promise<WorkflowExecution> {
     while (true) {
-      const StateClass = StateRegistry.get(context.currentState);
+      const StateClass = this.resolveState(context.currentState);
 
       if (!StateClass) {
         const error = new Error(`State not found: ${String(context.currentState)}`);
@@ -540,7 +617,7 @@ export class WorkflowExecutor<
         }
 
         if (execution.groupId && this.concurrencyManager) {
-          await this.concurrencyManager.releaseGroupLock(execution.groupId, execution.id);
+          await this.concurrencyManager.releaseGroupLock(execution.groupId, execution.id, this.metadata.name);
         }
 
         return execution;
@@ -608,7 +685,12 @@ export class WorkflowExecutor<
       const stateConcurrency = getStateConcurrency(stateInstance.constructor);
 
       if (execution.groupId && this.concurrencyManager && this.metadata.concurrency && stateConcurrency?.unlockAfter) {
-        await this.concurrencyManager.partialUnlock(execution.groupId, execution.id, this.metadata.concurrency);
+        await this.concurrencyManager.partialUnlock(
+          execution.groupId,
+          execution.id,
+          this.metadata.concurrency,
+          this.metadata.name
+        );
       }
 
       context.currentState = nextState;
@@ -625,70 +707,65 @@ export class WorkflowExecutor<
     currentState: keyof TOutputs,
     context: WorkflowContext<TData, TOutputs>
   ): Promise<keyof TOutputs | null> {
-    if (this.metadata.conditionalTransitions) {
-      for (const group of this.metadata.conditionalTransitions) {
-        if (group.from === currentState) {
-          for (const condition of group.conditions) {
-            const conditionMet = await condition.condition(context as any);
-            if (conditionMet) {
-              await this.applyVirtualOutputs(condition.virtualOutputs, context);
-              return condition.to as keyof TOutputs;
-            }
-          }
+    const group = this.conditionalTransitionsByState.get(currentState)?.[0];
 
-          await this.applyVirtualOutputs(group.defaultVirtualOutputs, context);
-          return (group.default as keyof TOutputs) || null;
+    if (group) {
+      for (const condition of group.conditions) {
+        const conditionMet = await condition.condition(context as any);
+
+        if (conditionMet) {
+          await this.applyVirtualOutputs(condition.virtualOutputs, context);
+
+          return condition.to as keyof TOutputs;
         }
+      }
+
+      await this.applyVirtualOutputs(group.defaultVirtualOutputs, context);
+
+      return (group.default as keyof TOutputs) || null;
+    }
+
+    for (const transition of this.transitionsByState.get(currentState) || []) {
+      if (transition.condition) {
+        const conditionMet = await transition.condition(context as any);
+
+        if (conditionMet) {
+          return transition.to as keyof TOutputs;
+        }
+      } else {
+        return transition.to as keyof TOutputs;
       }
     }
 
-    if (this.metadata.transitions) {
-      for (const transition of this.metadata.transitions) {
-        if ((transition.from as any[]).includes(currentState)) {
-          if (transition.condition) {
-            const conditionMet = await transition.condition(context as any);
-            if (conditionMet) {
-              return transition.to as keyof TOutputs;
-            }
-          } else {
-            return transition.to as keyof TOutputs;
-          }
-        }
-      }
-    }
+    const currentIndex = this.stateOrder.indexOf(currentState);
 
-    const stateValues = Object.values(this.metadata.states);
-    const currentIndex = stateValues.indexOf(currentState);
-
-    if (currentIndex !== -1 && currentIndex < stateValues.length - 1) {
-      return stateValues[currentIndex + 1] as keyof TOutputs;
+    if (currentIndex !== -1 && currentIndex < this.stateOrder.length - 1) {
+      return this.stateOrder[currentIndex + 1] as keyof TOutputs;
     }
 
     return null;
   }
 
+  private resolveState(stateValue: keyof TOutputs): StateHandler | undefined {
+    return this.stateHandlers.get(stateValue) || (StateRegistry.get(stateValue) as StateHandler | undefined);
+  }
+
   private canTransition(from: keyof TOutputs, to: keyof TOutputs): boolean {
-    if (this.metadata.transitions) {
-      for (const transition of this.metadata.transitions) {
-        if ((transition.from as any[]).includes(from) && transition.to === to) {
-          return true;
-        }
+    for (const transition of this.transitionsByState.get(from) || []) {
+      if (transition.to === to) {
+        return true;
       }
     }
 
-    if (this.metadata.conditionalTransitions) {
-      for (const group of this.metadata.conditionalTransitions) {
-        if (group.from === from) {
-          for (const condition of group.conditions) {
-            if (condition.to === to) {
-              return true;
-            }
-          }
-
-          if (group.default === to) {
-            return true;
-          }
+    for (const group of this.conditionalTransitionsByState.get(from) || []) {
+      for (const condition of group.conditions) {
+        if (condition.to === to) {
+          return true;
         }
+      }
+
+      if (group.default === to) {
+        return true;
       }
     }
 
@@ -749,6 +826,12 @@ export class WorkflowExecutor<
   }
 
   private async initializePlugins(): Promise<void> {
+    if (this.pluginsInitialized) {
+      return;
+    }
+
+    this.pluginsInitialized = true;
+
     for (const plugin of this.plugins) {
       if (plugin.onInit) {
         await plugin.onInit();
@@ -993,6 +1076,6 @@ export class WorkflowExecutor<
   }
 
   private generateExecutionId(): string {
-    return `exec_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    return randomUUID();
   }
 }

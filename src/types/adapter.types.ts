@@ -12,6 +12,14 @@ export interface PersistenceAdapter {
   load(executionId: string): Promise<WorkflowExecution | null>;
   update(executionId: string, updates: Partial<WorkflowExecution>): Promise<void>;
   find(filter: ExecutionFilter): Promise<WorkflowExecution[]>;
+  /**
+   * Optional. Atomically move a suspended execution to running, in a single conditional
+   * write, and report whether this caller won. Implement it wherever more than one process
+   * or timer can resume the same execution: without it resume() relies on a read-then-act
+   * status check, and a loser of that race overwrites the winner's progress with the
+   * snapshot it loaded. Adapters that omit it keep the previous behaviour.
+   */
+  claimSuspended?(executionId: string): Promise<boolean>;
 }
 
 export interface LockAdapter {

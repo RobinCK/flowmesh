@@ -239,16 +239,26 @@ describe('Integration: Throttle Lock Leak', () => {
 
     engine.registerWorkflow(LeakTestWorkflow);
 
-    await concurrencyManager.acquireGroupLock('user1', 'ghost-1', {
-      groupBy: 'userId',
-      mode: ConcurrencyMode.THROTTLE,
-      maxConcurrentAfterUnlock: 2,
-    });
-    await concurrencyManager.acquireGroupLock('user1', 'ghost-2', {
-      groupBy: 'userId',
-      mode: ConcurrencyMode.THROTTLE,
-      maxConcurrentAfterUnlock: 2,
-    });
+    await concurrencyManager.acquireGroupLock(
+      'user1',
+      'ghost-1',
+      {
+        groupBy: 'userId',
+        mode: ConcurrencyMode.THROTTLE,
+        maxConcurrentAfterUnlock: 2,
+      },
+      'LeakTestWorkflow'
+    );
+    await concurrencyManager.acquireGroupLock(
+      'user1',
+      'ghost-2',
+      {
+        groupBy: 'userId',
+        mode: ConcurrencyMode.THROTTLE,
+        maxConcurrentAfterUnlock: 2,
+      },
+      'LeakTestWorkflow'
+    );
 
     const forced = await engine.forceReleaseGroupLock(LeakTestWorkflow, 'user1');
 

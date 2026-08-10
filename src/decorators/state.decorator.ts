@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { StateMetadata, RetryConfig, StateConcurrencyConfig } from '../types';
+import { readCachedMetadata } from './metadata-cache';
 
 export const STATE_METADATA_KEY = Symbol.for('flowmesh:state');
 export const STATE_TIMEOUT_KEY = Symbol.for('flowmesh:state:timeout');
@@ -51,21 +52,41 @@ export function UnlockAfter(): ClassDecorator {
 }
 
 export function getStateMetadata<TState = unknown>(target: any): StateMetadata<TState> | undefined {
-  return Reflect.getMetadata(STATE_METADATA_KEY, target) || Reflect.getMetadata(STATE_METADATA_KEY, target.prototype);
+  return readCachedMetadata(
+    STATE_METADATA_KEY,
+    target,
+    () => Reflect.getMetadata(STATE_METADATA_KEY, target) || Reflect.getMetadata(STATE_METADATA_KEY, target.prototype)
+  );
 }
 
 export function getStateTimeout(target: any): number | undefined {
-  return Reflect.getMetadata(STATE_TIMEOUT_KEY, target) || Reflect.getMetadata(STATE_TIMEOUT_KEY, target.prototype);
+  return readCachedMetadata(
+    STATE_TIMEOUT_KEY,
+    target,
+    () => Reflect.getMetadata(STATE_TIMEOUT_KEY, target) || Reflect.getMetadata(STATE_TIMEOUT_KEY, target.prototype)
+  );
 }
 
 export function getStateDelay(target: any): number | undefined {
-  return Reflect.getMetadata(STATE_DELAY_KEY, target) || Reflect.getMetadata(STATE_DELAY_KEY, target.prototype);
+  return readCachedMetadata(
+    STATE_DELAY_KEY,
+    target,
+    () => Reflect.getMetadata(STATE_DELAY_KEY, target) || Reflect.getMetadata(STATE_DELAY_KEY, target.prototype)
+  );
 }
 
 export function getStateRetry(target: any): RetryConfig | undefined {
-  return Reflect.getMetadata(STATE_RETRY_KEY, target) || Reflect.getMetadata(STATE_RETRY_KEY, target.prototype);
+  return readCachedMetadata(
+    STATE_RETRY_KEY,
+    target,
+    () => Reflect.getMetadata(STATE_RETRY_KEY, target) || Reflect.getMetadata(STATE_RETRY_KEY, target.prototype)
+  );
 }
 
 export function getStateConcurrency(target: any): StateConcurrencyConfig | undefined {
-  return Reflect.getMetadata(STATE_CONCURRENCY_KEY, target) || Reflect.getMetadata(STATE_CONCURRENCY_KEY, target.prototype);
+  return readCachedMetadata(
+    STATE_CONCURRENCY_KEY,
+    target,
+    () => Reflect.getMetadata(STATE_CONCURRENCY_KEY, target) || Reflect.getMetadata(STATE_CONCURRENCY_KEY, target.prototype)
+  );
 }

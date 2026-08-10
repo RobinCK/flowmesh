@@ -387,7 +387,7 @@ describe('E2E: Complete Order Workflow', () => {
       });
 
       // Lock should be released after PROCESS_PAYMENT (@UnlockAfter)
-      expect(releaseSpy).toHaveBeenCalledWith('workflow:group:ORD-005');
+      expect(releaseSpy).toHaveBeenCalledWith('workflow:CompleteOrderWorkflow:group:ORD-005');
     });
 
     it('should continue execution after unlock', async () => {

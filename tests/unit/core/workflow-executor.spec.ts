@@ -1012,7 +1012,7 @@ describe('WorkflowExecutor - Uncovered Branches', () => {
       });
 
       expect(result.id).toBeDefined();
-      expect(result.id).toMatch(/^exec_\d+_[a-z0-9]+$/);
+      expect(result.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
       expect(result.status).toBe(WorkflowStatus.COMPLETED);
     });
 

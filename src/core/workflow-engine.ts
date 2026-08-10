@@ -6,6 +6,7 @@ import {
   LoggerAdapter,
   IWorkflowPlugin,
   WorkflowMetadataConfig,
+  StateHandler,
 } from '../types';
 import { WorkflowExecutor, ExecutionOptions, ResumeOptions } from './workflow-executor';
 import { ConcurrencyManager } from './concurrency-manager';
@@ -50,10 +51,19 @@ export class WorkflowEngine {
         : new (resolvedErrorHandler as any)();
     }
 
+    const resolvedStateHandlers: StateHandler[] | undefined = metadata.stateHandlers?.map(handler =>
+      typeof handler === 'function' && this.config.instanceFactory
+        ? (this.config.instanceFactory(handler as any) as StateHandler)
+        : handler
+    );
+
     const resolvedMetadata: WorkflowMetadataConfig = {
       ...metadata,
       errorHandler: resolvedErrorHandler as any,
+      stateHandlers: resolvedStateHandlers,
     };
+
+    StateRegistry.setLogger(this.config.logger);
 
     const executor = new WorkflowExecutor(
       workflowInstance,
@@ -152,7 +162,7 @@ export class WorkflowEngine {
       };
     }
 
-    const result = await this.concurrencyManager.forceReleaseGroupLock(groupId);
+    const result = await this.concurrencyManager.forceReleaseGroupLock(groupId, metadata.name);
 
     return {
       workflowName: metadata.name,

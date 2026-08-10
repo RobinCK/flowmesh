@@ -2,6 +2,7 @@ import { WorkflowContext } from './context.types';
 import { ErrorHandler } from './error-handler.types';
 import { PersistenceAdapter, LockAdapter, LoggerAdapter } from './adapter.types';
 import { IWorkflowPlugin } from './plugin.types';
+import { IState } from './state.types';
 
 export enum ConcurrencyMode {
   SEQUENTIAL = 'sequential',
@@ -44,7 +45,14 @@ export interface WorkflowMetadataConfig<TState = unknown> {
   transitions?: TransitionConfig<TState>[];
   conditionalTransitions?: ConditionalTransition<TState>[];
   errorHandler?: ErrorHandler | (new (...args: any[]) => ErrorHandler);
+  stateHandlers?: StateHandler[];
 }
+
+/**
+ * A state handler bound to a workflow. Declaring handlers on the workflow scopes their
+ * lookup to that workflow, so two workflows may reuse the same state value safely.
+ */
+export type StateHandler = (new (...args: any[]) => IState<any, any, any>) | IState<any, any, any>;
 
 export interface WorkflowLifecycleHooks<
   TData extends Record<string, unknown> = Record<string, unknown>,

@@ -131,7 +131,7 @@ describe('Integration: Partial Unlock with Resume', () => {
       });
 
       // Lock should be released after PAYMENT state (@UnlockAfter)
-      expect(spy).toHaveBeenCalledWith('workflow:group:order-1');
+      expect(spy).toHaveBeenCalledWith('workflow:PartialUnlockWorkflow:group:order-1');
     });
 
     it('should allow concurrent executions after unlock', async () => {
@@ -148,7 +148,7 @@ describe('Integration: Partial Unlock with Resume', () => {
       expect(suspended.currentState).toBe(PartialUnlockState.WAITING);
 
       // Lock should have been released after PAYMENT state
-      const isLocked = await lockAdapter.isLocked('workflow:group:order-2');
+      const isLocked = await lockAdapter.isLocked('workflow:PartialUnlockWorkflow:group:order-2');
       expect(isLocked).toBe(false);
     });
   });
@@ -304,7 +304,7 @@ describe('Integration: Partial Unlock with Resume', () => {
 
       // Should have released lock once (after @UnlockAfter PAYMENT state)
       expect(releaseSpy).toHaveBeenCalledTimes(1);
-      expect(releaseSpy).toHaveBeenCalledWith('workflow:group:order-track');
+      expect(releaseSpy).toHaveBeenCalledWith('workflow:PartialUnlockWorkflow:group:order-track');
     });
 
     it('should not hold lock during suspended state', async () => {
@@ -319,12 +319,12 @@ describe('Integration: Partial Unlock with Resume', () => {
       expect(suspended.status).toBe(WorkflowStatus.SUSPENDED);
 
       // Lock should be released
-      const isLocked = await lockAdapter.isLocked('workflow:group:order-no-lock');
+      const isLocked = await lockAdapter.isLocked('workflow:PartialUnlockWorkflow:group:order-no-lock');
       expect(isLocked).toBe(false);
 
       // Another workflow for same order should be able to start
       // (though it would also suspend at WAITING)
-      const isLocked2 = await lockAdapter.isLocked('workflow:group:order-no-lock');
+      const isLocked2 = await lockAdapter.isLocked('workflow:PartialUnlockWorkflow:group:order-no-lock');
       expect(isLocked2).toBe(false);
     });
   });

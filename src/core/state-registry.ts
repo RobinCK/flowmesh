@@ -1,13 +1,37 @@
-import { IState } from '../types';
+import { IState, LoggerAdapter } from '../types';
 import { getStateMetadata } from '../decorators';
 
 type StateClassOrInstance = (new (...args: any[]) => IState) | IState;
 
+const describeHandler = (handler: StateClassOrInstance): string =>
+  typeof handler === 'function' ? handler.name : handler.constructor.name;
+
 export class StateRegistry {
   private static states: Map<unknown, StateClassOrInstance> = new Map();
   private static instances: Map<unknown, IState> = new Map();
+  private static logger?: LoggerAdapter;
+
+  static setLogger(logger: LoggerAdapter | undefined): void {
+    this.logger = logger;
+  }
 
   static register(stateValue: unknown, stateClassOrInstance: StateClassOrInstance): void {
+    const existing = this.states.get(stateValue);
+
+    if (existing && existing !== stateClassOrInstance && describeHandler(existing) !== describeHandler(stateClassOrInstance)) {
+      const message =
+        `State value "${String(stateValue)}" is already registered by ${describeHandler(existing)} and is being ` +
+        `overwritten by ${describeHandler(stateClassOrInstance)}. State values are global, so two workflows sharing ` +
+        `one value will execute the handler registered last. Give the states distinct values or declare ` +
+        `stateHandlers on the @Workflow decorator.`;
+
+      if (this.logger) {
+        this.logger.warn(message);
+      } else {
+        console.warn(`[flowmesh] ${message}`);
+      }
+    }
+
     this.states.set(stateValue, stateClassOrInstance);
 
     if (this.isInstance(stateClassOrInstance)) {
